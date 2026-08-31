@@ -1,9 +1,3 @@
-using PdfSharp.Drawing;
-using PdfSharp.Pdf;
-using PdfSharp.Pdf.Advanced;
-using PdfSharp.Pdf.Content;
-using PdfSharp.Pdf.Content.Objects;
-using PdfSharp.Pdf.IO;
 using Newtonsoft.Json;
 using Soenneker.Pdfs.Processor.Abstract;
 using Soenneker.Pdfs.Processor.Enums;
@@ -13,11 +7,12 @@ using Soenneker.Tests.HostedUnit;
 using System.Reflection;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Soenneker.Pdfs.Processor.Tests;
 
 [ClassDataSource<Host>(Shared = SharedType.PerTestSession)]
-public sealed class PdfProcessorTests : HostedUnitTest
+public sealed partial class PdfProcessorTests : HostedUnitTest
 {
     private readonly IPdfProcessor _processor;
 
@@ -37,12 +32,14 @@ public sealed class PdfProcessorTests : HostedUnitTest
         [
             new PdfMergeSource { Stream = first, StartPage = 2, EndPage = 2 },
             new PdfMergeSource { Stream = second }
-        ], output);
+        ], output, new PdfMergeOptions { Output = NoCompression() });
 
-        output.Position = 0;
-        using PdfDocument merged = PdfReader.Open(output, PdfDocumentOpenMode.Import);
+        string pdf = GetPdfText(output);
         await Assert.That(result.PageCount).IsEqualTo(2);
-        await Assert.That(merged.PageCount).IsEqualTo(2);
+        await Assert.That(PageObjectRegex().Count(pdf)).IsEqualTo(2);
+        await Assert.That(pdf).Contains("First 2");
+        await Assert.That(pdf).Contains("Second 1");
+        AssertXrefOffsets(pdf);
     }
 
     [Test]
@@ -54,51 +51,44 @@ public sealed class PdfProcessorTests : HostedUnitTest
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "WORLD" }
-        ]);
+        ], new PdfReplaceOptions { Output = NoCompression() });
 
-        output.Position = 0;
-        using PdfDocument replaced = PdfReader.Open(output, PdfDocumentOpenMode.Modify);
-        CSequence content = ContentReader.ReadContent(replaced.Pages[0]);
-        string text = GetText(content);
-
+        string pdf = GetPdfText(output);
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(1);
         await Assert.That(result.Replacements[0].FontResourcePreserved).IsTrue();
-        await Assert.That(text).Contains("Hello WORLD");
-        await Assert.That(text).DoesNotContain("TOKEN");
+        await Assert.That(pdf).Contains("Hello WORLD");
+        await Assert.That(pdf).DoesNotContain("TOKEN");
+        await Assert.That(pdf).Contains("/F1 12 Tf");
     }
 
     [Test]
     public async Task ReplaceText_matches_across_TJ_fragments_and_preserves_positioning_operands()
     {
-        using MemoryStream source = CreateFragmentedPdf("Hello TO", "K", "EN tail");
+        using MemoryStream source = CreateRawTextPdf("[(Hello TO) 0 (K) 0 (EN tail)] TJ");
         using var output = new MemoryStream();
 
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "token", Replacement = "WONDERFUL WORLD" }
-        ], new PdfReplaceOptions { Comparison = PdfTextComparison.OrdinalIgnoreCase });
+        ], new PdfReplaceOptions { Comparison = PdfTextComparison.OrdinalIgnoreCase, Output = NoCompression() });
 
-        output.Position = 0;
-        using PdfDocument replaced = PdfReader.Open(output, PdfDocumentOpenMode.Modify);
-        CSequence content = ContentReader.ReadContent(replaced.Pages[0]);
-        COperator textOperator = FindOperator(content, "TJ");
-
+        string pdf = GetPdfText(output);
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(1);
         await Assert.That(result.Replacements[0].CrossFragmentReplacementCount).IsEqualTo(1);
-        await Assert.That(GetText(content).Replace(" ", string.Empty)).Contains("HelloWONDERFULWORLDtail");
-        await Assert.That(ContainsInteger(textOperator.Operands)).IsTrue();
+        await Assert.That(pdf.Replace(" ", string.Empty)).Contains("HelloWONDERFULWORLD");
+        await Assert.That(pdf).Contains(" 0 ");
     }
 
     [Test]
     public async Task ReplaceText_can_disable_cross_fragment_matching()
     {
-        using MemoryStream source = CreateFragmentedPdf("TO", "KEN");
+        using MemoryStream source = CreateRawTextPdf("[(TO) 0 (KEN)] TJ");
         using var output = new MemoryStream();
 
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "VALUE" }
-        ], new PdfReplaceOptions { MatchAcrossTextFragments = false });
+        ], new PdfReplaceOptions { MatchAcrossTextFragments = false, Output = NoCompression() });
 
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(0);
         await Assert.That(result.Replacements[0].CrossFragmentReplacementCount).IsEqualTo(0);
@@ -112,9 +102,10 @@ public sealed class PdfProcessorTests : HostedUnitTest
         using var contiguousOutput = new MemoryStream();
         using var positionedOutput = new MemoryStream();
         PdfTextReplacement[] replacements = [new PdfTextReplacement { Search = "TOKEN", Replacement = "VALUE" }];
+        var options = new PdfReplaceOptions { Output = NoCompression() };
 
-        PdfProcessResult contiguous = await _processor.ReplaceText(contiguousSource, contiguousOutput, replacements);
-        PdfProcessResult positioned = await _processor.ReplaceText(positionedSource, positionedOutput, replacements);
+        PdfProcessResult contiguous = await _processor.ReplaceText(contiguousSource, contiguousOutput, replacements, options);
+        PdfProcessResult positioned = await _processor.ReplaceText(positionedSource, positionedOutput, replacements, options);
 
         await Assert.That(contiguous.Replacements[0].ReplacementCount).IsEqualTo(1);
         await Assert.That(contiguous.Replacements[0].CrossFragmentReplacementCount).IsEqualTo(1);
@@ -124,34 +115,49 @@ public sealed class PdfProcessorTests : HostedUnitTest
     [Test]
     public async Task ReplaceText_applies_match_limits_across_fragmented_runs()
     {
-        using MemoryStream source = CreateFragmentedPdf("TO", "KEN TOKEN TOKEN");
+        using MemoryStream source = CreateRawTextPdf("[(TO) 0 (KEN TOKEN TOKEN)] TJ");
         using var output = new MemoryStream();
 
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "X", MaximumReplacements = 2 }
-        ]);
+        ], new PdfReplaceOptions { Output = NoCompression() });
 
-        output.Position = 0;
-        using PdfDocument replaced = PdfReader.Open(output, PdfDocumentOpenMode.Modify);
-        string text = GetText(ContentReader.ReadContent(replaced.Pages[0]));
-
+        string pdf = GetPdfText(output);
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(2);
         await Assert.That(result.Replacements[0].CrossFragmentReplacementCount).IsEqualTo(1);
-        await Assert.That(text).Contains("TOKEN");
+        await Assert.That(pdf).Contains("TOKEN");
     }
 
     [Test]
-    public async Task Optimize_removes_metadata()
+    public async Task ReplaceText_reads_Flate_compressed_content()
+    {
+        using MemoryStream source = CreatePdf("Compressed TOKEN", 1);
+        using var compressed = new MemoryStream();
+        using var output = new MemoryStream();
+        await _processor.Optimize(source, compressed, new PdfOutputOptions { Compression = PdfCompressionProfile.Maximum });
+        compressed.Position = 0;
+
+        PdfProcessResult result = await _processor.ReplaceText(compressed, output,
+        [
+            new PdfTextReplacement { Search = "TOKEN", Replacement = "VALUE" }
+        ], new PdfReplaceOptions { Output = NoCompression() });
+
+        await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(1);
+        await Assert.That(GetPdfText(output)).Contains("Compressed VALUE");
+    }
+
+    [Test]
+    public async Task Optimize_removes_metadata_from_the_file()
     {
         using MemoryStream source = CreatePdf("Metadata", 1, "Private title");
         using var output = new MemoryStream();
 
-        await _processor.Optimize(source, output, new PdfOutputOptions { RemoveMetadata = true });
+        await _processor.Optimize(source, output, new PdfOutputOptions { RemoveMetadata = true, Compression = PdfCompressionProfile.None });
 
-        output.Position = 0;
-        using PdfDocument optimized = PdfReader.Open(output, PdfDocumentOpenMode.Import);
-        await Assert.That(optimized.Info.Title).IsEmpty();
+        string pdf = GetPdfText(output);
+        await Assert.That(pdf).DoesNotContain("Private title");
+        await Assert.That(pdf).DoesNotContain("/Info");
     }
 
     [Test]
@@ -159,13 +165,8 @@ public sealed class PdfProcessorTests : HostedUnitTest
     {
         Type[] modelTypes =
         [
-            typeof(PdfMergeSource),
-            typeof(PdfTextReplacement),
-            typeof(PdfTextReplacementResult),
-            typeof(PdfProcessResult),
-            typeof(PdfOutputOptions),
-            typeof(PdfMergeOptions),
-            typeof(PdfReplaceOptions)
+            typeof(PdfMergeSource), typeof(PdfTextReplacement), typeof(PdfTextReplacementResult), typeof(PdfProcessResult),
+            typeof(PdfOutputOptions), typeof(PdfMergeOptions), typeof(PdfReplaceOptions)
         ];
 
         foreach (PropertyInfo property in modelTypes.SelectMany(static type => type.GetProperties(BindingFlags.Instance | BindingFlags.Public)))
@@ -175,128 +176,87 @@ public sealed class PdfProcessorTests : HostedUnitTest
         }
 
         var options = new PdfOutputOptions { Compression = PdfCompressionProfile.Maximum };
-        string systemTextJson = System.Text.Json.JsonSerializer.Serialize(options);
-        string newtonsoftJson = JsonConvert.SerializeObject(options);
-
-        await Assert.That(systemTextJson).Contains("\"compression\":\"maximum\"");
-        await Assert.That(newtonsoftJson).Contains("\"compression\":\"maximum\"");
+        await Assert.That(System.Text.Json.JsonSerializer.Serialize(options)).Contains("\"compression\":\"maximum\"");
+        await Assert.That(JsonConvert.SerializeObject(options)).Contains("\"compression\":\"maximum\"");
     }
+
+    private static PdfOutputOptions NoCompression() => new() { Compression = PdfCompressionProfile.None };
 
     private static MemoryStream CreatePdf(string text, int pageCount, string? title = null)
     {
-        var stream = new MemoryStream();
-        using (var document = new PdfDocument())
+        var objects = new List<string>();
+        int fontNumber = pageCount * 2 + 3;
+        int infoNumber = fontNumber + 1;
+        string kids = string.Join(' ', Enumerable.Range(0, pageCount).Select(index => $"{3 + index * 2} 0 R"));
+        objects.Add("<< /Type /Catalog /Pages 2 0 R >>");
+        objects.Add($"<< /Type /Pages /Kids [{kids}] /Count {pageCount} >>");
+        for (var index = 0; index < pageCount; index++)
         {
-            document.Info.Title = title ?? string.Empty;
-            var font = new XFont("Arial", 12, XFontStyleEx.Regular, new XPdfFontOptions(PdfFontEncoding.WinAnsi));
-
-            for (var index = 0; index < pageCount; index++)
-            {
-                PdfPage page = document.AddPage();
-                using XGraphics graphics = XGraphics.FromPdfPage(page);
-                graphics.DrawString($"{text} {index + 1}", font, XBrushes.Black, 72, 72);
-            }
-
-            document.Save(stream, false);
+            int pageNumber = 3 + index * 2;
+            int contentNumber = pageNumber + 1;
+            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 {fontNumber} 0 R >> >> /Contents {contentNumber} 0 R >>");
+            string content = $"BT /F1 12 Tf 72 720 Td ({EscapeLiteral(text)} {index + 1}) Tj ET";
+            objects.Add($"<< /Length {Encoding.ASCII.GetByteCount(content)} >>\nstream\n{content}\nendstream");
         }
-
-        stream.Position = 0;
-        return stream;
-    }
-
-    private static MemoryStream CreateFragmentedPdf(params string[] fragments)
-    {
-        string textArray = string.Join(" 0 ", fragments.Select(static fragment => $"({fragment})"));
-        return CreateRawTextPdf($"[{textArray}] TJ");
+        objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        objects.Add($"<< /Title ({EscapeLiteral(title ?? string.Empty)}) >>");
+        return WritePdf(objects, infoNumber);
     }
 
     private static MemoryStream CreateRawTextPdf(string textOperations)
     {
+        string content = $"q BT /F1 12 Tf 72 720 Td {textOperations} ET Q";
+        return WritePdf(
+        [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            $"<< /Length {Encoding.ASCII.GetByteCount(content)} >>\nstream\n{content}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+        ]);
+    }
+
+    private static MemoryStream WritePdf(IReadOnlyList<string> objects, int? infoNumber = null)
+    {
         var stream = new MemoryStream();
-        using (var document = new PdfDocument())
+        WriteAscii(stream, "%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Count; index++)
         {
-            PdfPage page = document.AddPage();
-            using (XGraphics graphics = XGraphics.FromPdfPage(page))
-            {
-                var font = new XFont("Arial", 12, XFontStyleEx.Regular, new XPdfFontOptions(PdfFontEncoding.WinAnsi));
-                graphics.DrawString("seed", font, XBrushes.Black, 72, 72);
-            }
-
-            PdfDictionary fonts = page.Resources.Elements.GetDictionary("/Font")!;
-            string fontResource = fonts.Elements.Keys.First();
-            string rawContent = $"q BT {fontResource} 12 Tf 72 720 Td {textOperations} ET Q";
-            var content = new PdfContent(document);
-            content.CreateStream(Encoding.ASCII.GetBytes(rawContent));
-            document.Internals.AddObject(content);
-            page.Elements["/Contents"] = content.Reference;
-            document.Save(stream, false);
+            offsets.Add(stream.Position);
+            WriteAscii(stream, $"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
         }
-
+        long xref = stream.Position;
+        WriteAscii(stream, $"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
+        for (var index = 1; index < offsets.Count; index++)
+            WriteAscii(stream, $"{offsets[index]:0000000000} 00000 n \n");
+        WriteAscii(stream, $"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R");
+        if (infoNumber != null)
+            WriteAscii(stream, $" /Info {infoNumber} 0 R");
+        WriteAscii(stream, $" >>\nstartxref\n{xref}\n%%EOF\n");
         stream.Position = 0;
         return stream;
     }
 
-    private static COperator FindOperator(CSequence sequence, string name)
+    private static string GetPdfText(MemoryStream stream) => Encoding.Latin1.GetString(stream.ToArray());
+
+    private static void AssertXrefOffsets(string pdf)
     {
-        foreach (CObject item in sequence)
+        foreach (Match match in ObjectRegex().Matches(pdf))
         {
-            if (item is COperator operation && operation.Name == name)
-                return operation;
-            if (item is COperator nestedOperation)
-            {
-                try
-                {
-                    return FindOperator(nestedOperation.Operands, name);
-                }
-                catch (InvalidOperationException)
-                {
-                }
-            }
-            else if (item is CSequence nested)
-            {
-                try
-                {
-                    return FindOperator(nested, name);
-                }
-                catch (InvalidOperationException)
-                {
-                }
-            }
-        }
-
-        throw new InvalidOperationException($"The PDF operator '{name}' was not found.");
-    }
-
-    private static bool ContainsInteger(CSequence sequence)
-    {
-        foreach (CObject item in sequence)
-        {
-            if (item is CInteger)
-                return true;
-            if (item is CSequence nested && ContainsInteger(nested))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static string GetText(CSequence sequence)
-    {
-        var values = new List<string>();
-        CollectStrings(sequence, values);
-        return string.Join(' ', values);
-    }
-
-    private static void CollectStrings(CSequence sequence, List<string> values)
-    {
-        foreach (CObject item in sequence)
-        {
-            if (item is CString text)
-                values.Add(text.Value);
-            else if (item is CSequence nested)
-                CollectStrings(nested, values);
-            else if (item is COperator operation)
-                CollectStrings(operation.Operands, values);
+            string offset = match.Index.ToString("0000000000");
+            if (!pdf.Contains(offset + " 00000 n", StringComparison.Ordinal))
+                throw new InvalidDataException($"The xref table does not contain object {match.Groups[1].Value} at byte {match.Index}.");
         }
     }
+
+    private static void WriteAscii(Stream stream, string value) => stream.Write(Encoding.ASCII.GetBytes(value));
+
+    private static string EscapeLiteral(string value) => value.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+
+    [GeneratedRegex(@"(?m)^\d+ 0 obj\s*\r?\n<<\s*/Type\s*/Page(?:\s|/)")]
+    private static partial Regex PageObjectRegex();
+
+    [GeneratedRegex(@"(?m)^(\d+) 0 obj$")]
+    private static partial Regex ObjectRegex();
 }

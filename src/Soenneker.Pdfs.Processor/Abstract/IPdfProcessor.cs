@@ -30,8 +30,8 @@ public interface IPdfProcessor
     /// Replaces text contained in individual PDF text-showing operands while retaining their existing font, size, color, and transform operators.
     /// </summary>
     /// <remarks>
-    /// A replacement cannot cross separate PDF text operands. Fonts that use custom glyph encodings or omit replacement glyphs may not be safely replaceable;
-    /// use the returned replacement results to determine what was changed.
+    /// A replacement can span consecutive text-showing operands when enabled, but never crosses an intervening positioning or graphics-state operator.
+    /// Fonts that use custom glyph encodings or omit replacement glyphs may not be safely replaceable; use the returned replacement results to determine what was changed.
     /// </remarks>
     /// <param name="source">A readable, seekable PDF stream. The caller retains ownership.</param>
     /// <param name="destination">The writable destination stream. The caller retains ownership.</param>

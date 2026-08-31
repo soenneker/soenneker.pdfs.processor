@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Soenneker.Pdfs.Processor.Abstract;
 using Soenneker.Utils.File.Registrars;
+using Soenneker.Utils.MemoryStream.Registrars;
 using Soenneker.Utils.Path.Registrars;
 
 namespace Soenneker.Pdfs.Processor.Registrars;
@@ -17,6 +18,7 @@ public static class PdfProcessorRegistrar
     public static IServiceCollection AddPdfProcessorAsSingleton(this IServiceCollection services)
     {
         services.AddFileUtilAsSingleton()
+                .AddMemoryStreamUtilAsSingleton()
                 .AddPathUtilAsSingleton()
                 .TryAddSingleton<IPdfProcessor, PdfProcessor>();
 
@@ -29,6 +31,7 @@ public static class PdfProcessorRegistrar
     public static IServiceCollection AddPdfProcessorAsScoped(this IServiceCollection services)
     {
         services.AddFileUtilAsSingleton()
+                .AddMemoryStreamUtilAsSingleton()
                 .AddPathUtilAsSingleton()
                 .TryAddScoped<IPdfProcessor, PdfProcessor>();
 

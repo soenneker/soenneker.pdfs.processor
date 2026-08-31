@@ -5,7 +5,6 @@ using Serilog;
 using Soenneker.TestHosts.Unit;
 using Soenneker.Utils.Test;
 using Soenneker.Pdfs.Processor.Registrars;
-using PdfSharp.Fonts;
 
 namespace Soenneker.Pdfs.Processor.Tests;
 
@@ -13,7 +12,6 @@ public sealed class Host : UnitTestHost
 {
     public override Task InitializeAsync()
     {
-        GlobalFontSettings.UseWindowsFontsUnderWindows = true;
         SetupIoC(Services);
 
         return base.InitializeAsync();

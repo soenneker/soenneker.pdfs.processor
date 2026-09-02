@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace Soenneker.Pdfs.Processor.Tests;
 
@@ -22,7 +23,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task Merge_preserves_pages_and_selected_ranges()
+    public async Task Merge_preserves_pages_and_selected_ranges(CancellationToken cancellationToken)
     {
         using MemoryStream first = CreatePdf("First", 2);
         using MemoryStream second = CreatePdf("Second", 1);
@@ -32,7 +33,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         [
             new PdfMergeSource { Stream = first, StartPage = 2, EndPage = 2 },
             new PdfMergeSource { Stream = second }
-        ], output, new PdfMergeOptions { Output = NoCompression() });
+        ], output, new PdfMergeOptions { Output = NoCompression() }, cancellationToken);
 
         string pdf = GetPdfText(output);
         await Assert.That(result.PageCount).IsEqualTo(2);
@@ -43,7 +44,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_rewrites_operand_and_preserves_font_operator()
+    public async Task ReplaceText_rewrites_operand_and_preserves_font_operator(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreatePdf("Hello TOKEN", 1);
         using var output = new MemoryStream();
@@ -51,7 +52,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "WORLD" }
-        ], new PdfReplaceOptions { Output = NoCompression() });
+        ], new PdfReplaceOptions { Output = NoCompression() }, cancellationToken);
 
         string pdf = GetPdfText(output);
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(1);
@@ -62,7 +63,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_matches_across_TJ_fragments_and_preserves_positioning_operands()
+    public async Task ReplaceText_matches_across_TJ_fragments_and_preserves_positioning_operands(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreateRawTextPdf("[(Hello TO) 0 (K) 0 (EN tail)] TJ");
         using var output = new MemoryStream();
@@ -70,7 +71,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "token", Replacement = "WONDERFUL WORLD" }
-        ], new PdfReplaceOptions { Comparison = PdfTextComparison.OrdinalIgnoreCase, Output = NoCompression() });
+        ], new PdfReplaceOptions { Comparison = PdfTextComparison.OrdinalIgnoreCase, Output = NoCompression() }, cancellationToken);
 
         string pdf = GetPdfText(output);
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(1);
@@ -80,7 +81,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_can_disable_cross_fragment_matching()
+    public async Task ReplaceText_can_disable_cross_fragment_matching(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreateRawTextPdf("[(TO) 0 (KEN)] TJ");
         using var output = new MemoryStream();
@@ -88,14 +89,14 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "VALUE" }
-        ], new PdfReplaceOptions { MatchAcrossTextFragments = false, Output = NoCompression() });
+        ], new PdfReplaceOptions { MatchAcrossTextFragments = false, Output = NoCompression() }, cancellationToken);
 
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(0);
         await Assert.That(result.Replacements[0].CrossFragmentReplacementCount).IsEqualTo(0);
     }
 
     [Test]
-    public async Task ReplaceText_matches_consecutive_text_operators_but_not_across_positioning_changes()
+    public async Task ReplaceText_matches_consecutive_text_operators_but_not_across_positioning_changes(CancellationToken cancellationToken)
     {
         using MemoryStream contiguousSource = CreateRawTextPdf("(TO) Tj (KEN) Tj");
         using MemoryStream positionedSource = CreateRawTextPdf("(TO) Tj 10 0 Td (KEN) Tj");
@@ -104,8 +105,8 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         PdfTextReplacement[] replacements = [new PdfTextReplacement { Search = "TOKEN", Replacement = "VALUE" }];
         var options = new PdfReplaceOptions { Output = NoCompression() };
 
-        PdfProcessResult contiguous = await _processor.ReplaceText(contiguousSource, contiguousOutput, replacements, options);
-        PdfProcessResult positioned = await _processor.ReplaceText(positionedSource, positionedOutput, replacements, options);
+        PdfProcessResult contiguous = await _processor.ReplaceText(contiguousSource, contiguousOutput, replacements, options, cancellationToken: cancellationToken);
+        PdfProcessResult positioned = await _processor.ReplaceText(positionedSource, positionedOutput, replacements, options, cancellationToken: cancellationToken);
 
         await Assert.That(contiguous.Replacements[0].ReplacementCount).IsEqualTo(1);
         await Assert.That(contiguous.Replacements[0].CrossFragmentReplacementCount).IsEqualTo(1);
@@ -113,7 +114,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_applies_match_limits_across_fragmented_runs()
+    public async Task ReplaceText_applies_match_limits_across_fragmented_runs(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreateRawTextPdf("[(TO) 0 (KEN TOKEN TOKEN)] TJ");
         using var output = new MemoryStream();
@@ -121,7 +122,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         PdfProcessResult result = await _processor.ReplaceText(source, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "X", MaximumReplacements = 2 }
-        ], new PdfReplaceOptions { Output = NoCompression() });
+        ], new PdfReplaceOptions { Output = NoCompression() }, cancellationToken);
 
         string pdf = GetPdfText(output);
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(2);
@@ -130,30 +131,30 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_reads_Flate_compressed_content()
+    public async Task ReplaceText_reads_Flate_compressed_content(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreatePdf("Compressed TOKEN", 1);
         using var compressed = new MemoryStream();
         using var output = new MemoryStream();
-        await _processor.Optimize(source, compressed, new PdfOutputOptions { Compression = PdfCompressionProfile.Maximum });
+        await _processor.Optimize(source, compressed, new PdfOutputOptions { Compression = PdfCompressionProfile.Maximum }, cancellationToken: cancellationToken);
         compressed.Position = 0;
 
         PdfProcessResult result = await _processor.ReplaceText(compressed, output,
         [
             new PdfTextReplacement { Search = "TOKEN", Replacement = "VALUE" }
-        ], new PdfReplaceOptions { Output = NoCompression() });
+        ], new PdfReplaceOptions { Output = NoCompression() }, cancellationToken);
 
         await Assert.That(result.Replacements[0].ReplacementCount).IsEqualTo(1);
         await Assert.That(GetPdfText(output)).Contains("Compressed VALUE");
     }
 
     [Test]
-    public async Task Optimize_removes_metadata_from_the_file()
+    public async Task Optimize_removes_metadata_from_the_file(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreatePdf("Metadata", 1, "Private title");
         using var output = new MemoryStream();
 
-        await _processor.Optimize(source, output, new PdfOutputOptions { RemoveMetadata = true, Compression = PdfCompressionProfile.None });
+        await _processor.Optimize(source, output, new PdfOutputOptions { RemoveMetadata = true, Compression = PdfCompressionProfile.None }, cancellationToken: cancellationToken);
 
         string pdf = GetPdfText(output);
         await Assert.That(pdf).DoesNotContain("Private title");

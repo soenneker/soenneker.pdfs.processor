@@ -10,6 +10,7 @@ using System.Text;
 
 namespace Soenneker.Pdfs.Processor;
 
+/// <inheritdoc cref="IPdfProcessor" />
 public sealed class PdfProcessor : IPdfProcessor
 {
     private readonly IFileUtil _fileUtil;

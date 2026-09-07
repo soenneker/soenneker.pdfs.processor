@@ -1,3 +1,4 @@
+using System.Buffers;
 using Soenneker.Utils.MemoryStream.Abstract;
 using System.Text;
 
@@ -20,14 +21,19 @@ internal sealed class PdfContentDocument
                 break;
 
             int tokenStart = reader.Position;
-            try
+            if (reader.Current is (byte)'<' or (byte)'(' or (byte)'[' or (byte)'/' or
+                (byte)'+' or (byte)'-' or (byte)'.' or >= (byte)'0' and <= (byte)'9' or
+                (byte)'t' or (byte)'f' or (byte)'n')
             {
-                operands.Add(reader.ReadValue());
-                continue;
-            }
-            catch (InvalidDataException)
-            {
-                reader.Position = tokenStart;
+                try
+                {
+                    operands.Add(reader.ReadValue());
+                    continue;
+                }
+                catch (InvalidDataException)
+                {
+                    reader.Position = tokenStart;
+                }
             }
 
             string operation = reader.ReadOperatorToken();
@@ -149,7 +155,22 @@ internal sealed class PdfContentDocument
         output.WriteByte((byte)')');
     }
 
-    private static void WriteAscii(Stream output, string value) => output.Write(Encoding.Latin1.GetBytes(value));
+    private static void WriteAscii(Stream output, string value)
+    {
+        int length = Encoding.Latin1.GetByteCount(value);
+        byte[]? rented = null;
+        Span<byte> bytes = length <= 256 ? stackalloc byte[256] : (rented = ArrayPool<byte>.Shared.Rent(length));
+        try
+        {
+            int written = Encoding.Latin1.GetBytes(value.AsSpan(), bytes);
+            output.Write(bytes[..written]);
+        }
+        finally
+        {
+            if (rented != null)
+                ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
 
     private static bool IsWhiteSpace(byte value) => value is 0 or 9 or 10 or 12 or 13 or 32;
 }

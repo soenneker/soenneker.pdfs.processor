@@ -292,6 +292,9 @@ public sealed class PdfProcessor : IPdfProcessor
             searchFrom = match + search.Length;
         }
 
+        if (matches.Count == 0)
+            return 0;
+
         byte[] replacementBytes = Encoding.Latin1.GetBytes(replacement);
         for (int matchIndex = matches.Count - 1; matchIndex >= 0; matchIndex--)
         {

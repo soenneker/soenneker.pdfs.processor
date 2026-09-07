@@ -78,6 +78,9 @@ internal sealed class PdfDocumentModel
 
     internal PdfValue? Resolve(PdfValue? value)
     {
+        if (value is not PdfReference)
+            return value;
+
         var visited = new HashSet<int>();
         while (value is PdfReference reference)
         {

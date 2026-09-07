@@ -37,7 +37,7 @@ internal static class PdfDocumentReader
 
             byte[]? streamData = null;
             reader.SkipWhiteSpaceAndComments();
-            if (value is PdfDictionary dictionary && reader.TryReadKeyword("stream"))
+            if (value is PdfDictionary dictionary && reader.TryReadKeyword("stream"u8))
             {
                 reader.ConsumeStreamLineEnding();
                 int streamStart = reader.Position;
@@ -51,7 +51,7 @@ internal static class PdfDocumentReader
 
                 streamData = data.AsSpan(streamStart, streamEnd - streamStart).ToArray();
                 reader.Position = streamEnd;
-                reader.TryReadKeyword("endstream");
+                reader.TryReadKeyword("endstream"u8);
             }
 
             document.Objects[number] = new PdfIndirectObject
@@ -141,7 +141,8 @@ internal static class PdfDocumentReader
     private static byte[] DecodeAscii85(byte[] value, IMemoryStreamUtil memoryStreamUtil)
     {
         using MemoryStream output = memoryStreamUtil.GetSync();
-        var group = new List<byte>(5);
+        Span<byte> group = stackalloc byte[5];
+        var groupCount = 0;
         var index = 0;
         while (index < value.Length)
         {
@@ -157,34 +158,34 @@ internal static class PdfDocumentReader
                 break;
             if (character == (byte)'z')
             {
-                if (group.Count != 0)
+                if (groupCount != 0)
                     throw new InvalidDataException("An ASCII85 z marker occurred inside a partial group.");
                 output.Write([0, 0, 0, 0]);
                 continue;
             }
             if (character is < (byte)'!' or > (byte)'u')
                 throw new InvalidDataException("An ASCII85 PDF stream contains an invalid character.");
-            group.Add(character);
-            if (group.Count == 5)
+            group[groupCount++] = character;
+            if (groupCount == 5)
             {
                 WriteAscii85Group(output, group, 4);
-                group.Clear();
+                groupCount = 0;
             }
         }
 
-        if (group.Count == 1)
+        if (groupCount == 1)
             throw new InvalidDataException("An ASCII85 PDF stream ends with an invalid partial group.");
-        if (group.Count > 1)
+        if (groupCount > 1)
         {
-            int bytesToWrite = group.Count - 1;
-            while (group.Count < 5)
-                group.Add((byte)'u');
+            int bytesToWrite = groupCount - 1;
+            while (groupCount < 5)
+                group[groupCount++] = (byte)'u';
             WriteAscii85Group(output, group, bytesToWrite);
         }
         return output.ToArray();
     }
 
-    private static void WriteAscii85Group(Stream output, List<byte> group, int bytesToWrite)
+    private static void WriteAscii85Group(Stream output, ReadOnlySpan<byte> group, int bytesToWrite)
     {
         ulong value = 0;
         foreach (byte character in group)
@@ -446,10 +447,9 @@ internal sealed class PdfSyntaxReader
         }
     }
 
-    internal bool TryReadKeyword(string keyword)
+    internal bool TryReadKeyword(ReadOnlySpan<byte> bytes)
     {
         SkipWhiteSpaceAndComments();
-        ReadOnlySpan<byte> bytes = Encoding.ASCII.GetBytes(keyword);
         if (Position + bytes.Length > _data.Length || !_data.AsSpan(Position, bytes.Length).SequenceEqual(bytes))
             return false;
         if (Position + bytes.Length < _data.Length && !IsDelimiterOrWhiteSpace(_data[Position + bytes.Length]))
@@ -618,7 +618,7 @@ internal sealed class PdfSyntaxReader
             if (second.IsInteger)
             {
                 SkipWhiteSpaceAndComments();
-                if (TryReadKeyword("R"))
+                if (TryReadKeyword("R"u8))
                     return new PdfReference(first.AsInt32(), second.AsInt32());
             }
         }

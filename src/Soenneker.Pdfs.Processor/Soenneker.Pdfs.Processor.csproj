@@ -46,6 +46,6 @@
     <ItemGroup>
         <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
         <PackageReference Include="Soenneker.Utils.File" Version="4.0.2259" />
-        <PackageReference Include="Soenneker.Utils.Path" Version="4.0.1220" />
+        <PackageReference Include="Soenneker.Utils.Path" Version="4.0.1221" />
     </ItemGroup>
 </Project>

@@ -49,7 +49,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.401
 
       - name: Restore tests
         run: dotnet restore test/Soenneker.Pdfs.Processor.Tests/Soenneker.Pdfs.Processor.Tests.csproj --verbosity minimal

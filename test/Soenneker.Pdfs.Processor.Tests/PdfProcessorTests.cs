@@ -23,7 +23,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task Merge_preserves_pages_and_selected_ranges(CancellationToken cancellationToken)
+    public async ValueTask Merge_preserves_pages_and_selected_ranges(CancellationToken cancellationToken)
     {
         using MemoryStream first = CreatePdf("First", 2);
         using MemoryStream second = CreatePdf("Second", 1);
@@ -44,7 +44,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_rewrites_operand_and_preserves_font_operator(CancellationToken cancellationToken)
+    public async ValueTask ReplaceText_rewrites_operand_and_preserves_font_operator(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreatePdf("Hello TOKEN", 1);
         using var output = new MemoryStream();
@@ -63,7 +63,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_matches_across_TJ_fragments_and_preserves_positioning_operands(CancellationToken cancellationToken)
+    public async ValueTask ReplaceText_matches_across_TJ_fragments_and_preserves_positioning_operands(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreateRawTextPdf("[(Hello TO) 0 (K) 0 (EN tail)] TJ");
         using var output = new MemoryStream();
@@ -81,7 +81,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_can_disable_cross_fragment_matching(CancellationToken cancellationToken)
+    public async ValueTask ReplaceText_can_disable_cross_fragment_matching(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreateRawTextPdf("[(TO) 0 (KEN)] TJ");
         using var output = new MemoryStream();
@@ -96,7 +96,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_matches_consecutive_text_operators_but_not_across_positioning_changes(CancellationToken cancellationToken)
+    public async ValueTask ReplaceText_matches_consecutive_text_operators_but_not_across_positioning_changes(CancellationToken cancellationToken)
     {
         using MemoryStream contiguousSource = CreateRawTextPdf("(TO) Tj (KEN) Tj");
         using MemoryStream positionedSource = CreateRawTextPdf("(TO) Tj 10 0 Td (KEN) Tj");
@@ -114,7 +114,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_applies_match_limits_across_fragmented_runs(CancellationToken cancellationToken)
+    public async ValueTask ReplaceText_applies_match_limits_across_fragmented_runs(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreateRawTextPdf("[(TO) 0 (KEN TOKEN TOKEN)] TJ");
         using var output = new MemoryStream();
@@ -131,7 +131,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task ReplaceText_reads_Flate_compressed_content(CancellationToken cancellationToken)
+    public async ValueTask ReplaceText_reads_Flate_compressed_content(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreatePdf("Compressed TOKEN", 1);
         using var compressed = new MemoryStream();
@@ -149,7 +149,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task Optimize_removes_metadata_from_the_file(CancellationToken cancellationToken)
+    public async ValueTask Optimize_removes_metadata_from_the_file(CancellationToken cancellationToken)
     {
         using MemoryStream source = CreatePdf("Metadata", 1, "Private title");
         using var output = new MemoryStream();
@@ -162,7 +162,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async Task Public_models_have_dual_json_names_and_enum_values_serialize_by_value()
+    public async ValueTask Public_models_have_dual_json_names_and_enum_values_serialize_by_value()
     {
         Type[] modelTypes =
         [

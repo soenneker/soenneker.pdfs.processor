@@ -1,4 +1,3 @@
-using Newtonsoft.Json;
 using Soenneker.Pdfs.Processor.Abstract;
 using Soenneker.Pdfs.Processor.Enums;
 using Soenneker.Pdfs.Processor.Models;
@@ -162,7 +161,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async ValueTask Public_models_have_dual_json_names_and_enum_values_serialize_by_value()
+    public async ValueTask Public_models_have_json_names_and_enum_values_serialize_by_value()
     {
         Type[] modelTypes =
         [
@@ -173,12 +172,10 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
         foreach (PropertyInfo property in modelTypes.SelectMany(static type => type.GetProperties(BindingFlags.Instance | BindingFlags.Public)))
         {
             await Assert.That(property.GetCustomAttribute<JsonPropertyNameAttribute>()).IsNotNull();
-            await Assert.That(property.GetCustomAttribute<JsonPropertyAttribute>()).IsNotNull();
         }
 
         var options = new PdfOutputOptions { Compression = PdfCompressionProfile.Maximum };
         await Assert.That(System.Text.Json.JsonSerializer.Serialize(options)).Contains("\"compression\":\"maximum\"");
-        await Assert.That(JsonConvert.SerializeObject(options)).Contains("\"compression\":\"maximum\"");
     }
 
     private static PdfOutputOptions NoCompression() => new() { Compression = PdfCompressionProfile.None };

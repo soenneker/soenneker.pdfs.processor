@@ -161,7 +161,7 @@ public sealed partial class PdfProcessorTests : HostedUnitTest
     }
 
     [Test]
-    public async ValueTask Public_models_have_json_names_and_enum_values_serialize_by_value()
+    public async ValueTask Public_models_have_json_names_and_enum_values_serialize_by_value(CancellationToken cancellationToken)
     {
         Type[] modelTypes =
         [

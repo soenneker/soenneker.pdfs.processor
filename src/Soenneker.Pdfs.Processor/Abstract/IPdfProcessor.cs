@@ -6,6 +6,12 @@ namespace Soenneker.Pdfs.Processor.Abstract;
 /// <summary>
 /// Provides structural PDF merging, text-run replacement, cleanup, and compression operations.
 /// </summary>
+/// <remarks>
+/// Processing rejects inputs above 64 MiB, more than 100,000 objects, nesting deeper than 128 levels,
+/// streams decoding beyond 16 MiB, more than 16 filters per stream, or cumulative decoded data above
+/// 128 MiB per document (including intermediate filter results and repeated decoding).
+/// Resource-limit failures throw <see cref="IOException"/>. Callers retain ownership of streams.
+/// </remarks>
 public interface IPdfProcessor
 {
     /// <summary>Merges pages from the supplied PDF sources without rasterizing them.</summary>

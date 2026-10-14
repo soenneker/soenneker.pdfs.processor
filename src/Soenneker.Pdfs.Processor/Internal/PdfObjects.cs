@@ -67,6 +67,8 @@ internal sealed class PdfDocumentModel
 {
     internal Dictionary<int, PdfIndirectObject> Objects { get; } = [];
 
+    internal PdfDecodeBudget DecodeBudget { get; init; } = new();
+
     internal PdfReference? RootReference { get; set; }
 
     internal PdfReference? InfoReference { get; set; }
@@ -107,8 +109,10 @@ internal sealed class PdfDocumentModel
         return pages;
     }
 
-    private void CollectPages(PdfReference reference, List<PdfReference> pages, HashSet<int> visited)
+    private void CollectPages(PdfReference reference, List<PdfReference> pages, HashSet<int> visited, int depth = 0)
     {
+        PdfProcessingLimits.CheckDepth(depth);
+        DecodeBudget.CancellationToken.ThrowIfCancellationRequested();
         if (!visited.Add(reference.ObjectNumber))
             throw new InvalidDataException("The PDF page tree contains a cycle.");
 
@@ -127,7 +131,7 @@ internal sealed class PdfDocumentModel
         {
             if (kid is not PdfReference child)
                 throw new InvalidDataException("A PDF page-tree child is not an indirect reference.");
-            CollectPages(child, pages, visited);
+            CollectPages(child, pages, visited, depth + 1);
         }
     }
 }

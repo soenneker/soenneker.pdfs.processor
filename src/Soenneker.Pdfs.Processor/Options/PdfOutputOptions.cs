@@ -24,7 +24,7 @@ public sealed class PdfOutputOptions
     [JsonPropertyName("removeEmbeddedFiles")]
     public bool RemoveEmbeddedFiles { get; set; }
 
-    /// <summary>Gets or sets whether document JavaScript, automatic actions, and page automatic actions are removed.</summary>
+    /// <summary>Gets or sets whether document JavaScript and document, page, annotation, outline, and form-field actions are removed.</summary>
     [JsonPropertyName("removeJavaScriptAndActions")]
     public bool RemoveJavaScriptAndActions { get; set; }
 }

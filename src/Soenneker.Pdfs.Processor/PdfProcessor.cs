@@ -10,7 +10,6 @@ using System.Text;
 
 namespace Soenneker.Pdfs.Processor;
 
-/// <inheritdoc cref="IPdfProcessor" />
 public sealed class PdfProcessor : IPdfProcessor
 {
     private readonly IFileUtil _fileUtil;
@@ -34,7 +33,7 @@ public sealed class PdfProcessor : IPdfProcessor
 
         options ??= new PdfMergeOptions();
         long? inputLength = SumLengths(sources.Select(static source => source.Stream));
-        PdfDocumentModel resultDocument = PdfDocumentCloner.CreateDocument();
+        PdfDocumentModel resultDocument = PdfDocumentCloner.CreateDocument(cancellationToken);
         var sourceIndex = 0;
 
         foreach (PdfMergeSource source in sources)
@@ -170,8 +169,9 @@ public sealed class PdfProcessor : IPdfProcessor
         return result;
     }
 
-    private static void CollectContentStreams(PdfDocumentModel document, PdfValue? value, List<PdfIndirectObject> result, HashSet<int> visited)
+    private static void CollectContentStreams(PdfDocumentModel document, PdfValue? value, List<PdfIndirectObject> result, HashSet<int> visited, int depth = 0)
     {
+        PdfProcessingLimits.CheckDepth(depth);
         if (value is PdfReference reference)
         {
             if (!visited.Add(reference.ObjectNumber))
@@ -180,13 +180,13 @@ public sealed class PdfProcessor : IPdfProcessor
             if (indirect.StreamData != null)
                 result.Add(indirect);
             else
-                CollectContentStreams(document, indirect.Value, result, visited);
+                CollectContentStreams(document, indirect.Value, result, visited, depth + 1);
             return;
         }
 
         if (value is PdfArray array)
             foreach (PdfValue item in array.Items)
-                CollectContentStreams(document, item, result, visited);
+                CollectContentStreams(document, item, result, visited, depth + 1);
     }
 
     private static ReplacementState[] CreateReplacementStates(IReadOnlyCollection<PdfTextReplacement> replacements, PdfReplaceOptions options)

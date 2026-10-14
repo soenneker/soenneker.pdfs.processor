@@ -57,15 +57,20 @@ internal static class PdfDocumentWriter
         }
 
         long xrefOffset = destination.Position;
-        int size = document.Objects.Count == 0 ? 1 : document.Objects.Keys.Max() + 1;
-        await WriteAscii(destination, $"xref\n0 {size}\n", cancellationToken);
-        await WriteAscii(destination, "0000000000 65535 f \n", cancellationToken);
-        for (var number = 1; number < size; number++)
+        long size = document.Objects.Count == 0 ? 1 : (long)document.Objects.Keys.Max() + 1;
+        await WriteAscii(destination, "xref\n0 1\n0000000000 65535 f \n", cancellationToken);
+        int[] numbers = offsets.Keys.Order().ToArray();
+        for (var index = 0; index < numbers.Length;)
         {
-            if (offsets.TryGetValue(number, out long offset))
-                await WriteAscii(destination, $"{offset:0000000000} {document.Objects[number].Generation:00000} n \n", cancellationToken);
-            else
-                await WriteAscii(destination, "0000000000 65535 f \n", cancellationToken);
+            int start = index++;
+            while (index < numbers.Length && (long)numbers[index] == (long)numbers[index - 1] + 1)
+                index++;
+            await WriteAscii(destination, $"{numbers[start]} {index - start}\n", cancellationToken);
+            for (int entry = start; entry < index; entry++)
+            {
+                int number = numbers[entry];
+                await WriteAscii(destination, $"{offsets[number]:0000000000} {document.Objects[number].Generation:00000} n \n", cancellationToken);
+            }
         }
 
         await WriteAscii(destination, $"trailer\n<< /Size {size} /Root {document.RootReference.ObjectNumber} {document.RootReference.Generation} R", cancellationToken);
@@ -92,8 +97,7 @@ internal static class PdfDocumentWriter
 
         if (options.RemoveJavaScriptAndActions)
         {
-            catalog.Items.Remove("OpenAction");
-            catalog.Items.Remove("AA");
+            RemoveActions(document);
         }
 
         foreach (PdfReference pageReference in document.GetPages())
@@ -106,6 +110,35 @@ internal static class PdfDocumentWriter
         }
 
         RecompressStreams(document, options.Compression, memoryStreamUtil);
+    }
+
+    private static void RemoveActions(PdfDocumentModel document)
+    {
+        var pending = new Stack<PdfValue>(document.Objects.Values.Select(static value => value.Value));
+        var visited = new HashSet<PdfValue>(ReferenceEqualityComparer.Instance);
+        while (pending.TryPop(out PdfValue? value))
+        {
+            document.DecodeBudget.CancellationToken.ThrowIfCancellationRequested();
+            if (!visited.Add(value))
+                continue;
+            if (value is PdfDictionary dictionary)
+            {
+                dictionary.Items.Remove("OpenAction");
+                dictionary.Items.Remove("AA");
+                // A is also used for structure attributes; only remove action dictionaries.
+                if (document.Resolve(dictionary.Get("A")) is PdfDictionary action && action.GetName("S", document) != null)
+                    dictionary.Items.Remove("A");
+                if (dictionary.GetName("S", document) == "JavaScript")
+                    dictionary.Items.Clear();
+                foreach (PdfValue child in dictionary.Items.Values)
+                    pending.Push(child);
+            }
+            else if (value is PdfArray array)
+            {
+                foreach (PdfValue child in array.Items)
+                    pending.Push(child);
+            }
+        }
     }
 
     internal static void SetDecodedStream(PdfIndirectObject streamObject, byte[] decoded, PdfCompressionProfile profile,
@@ -160,22 +193,24 @@ internal static class PdfDocumentWriter
             document.Objects.Remove(objectNumber);
     }
 
-    private static void Visit(PdfValue value, PdfDocumentModel document, HashSet<int> reachable)
+    private static void Visit(PdfValue value, PdfDocumentModel document, HashSet<int> reachable, int depth = 0)
     {
+        PdfProcessingLimits.CheckDepth(depth);
+        document.DecodeBudget.CancellationToken.ThrowIfCancellationRequested();
         switch (value)
         {
             case PdfReference reference:
                 if (!reachable.Add(reference.ObjectNumber) || !document.Objects.TryGetValue(reference.ObjectNumber, out PdfIndirectObject? indirect))
                     return;
-                Visit(indirect.Value, document, reachable);
+                Visit(indirect.Value, document, reachable, depth + 1);
                 break;
             case PdfArray array:
                 foreach (PdfValue item in array.Items)
-                    Visit(item, document, reachable);
+                    Visit(item, document, reachable, depth + 1);
                 break;
             case PdfDictionary dictionary:
                 foreach (PdfValue item in dictionary.Items.Values)
-                    Visit(item, document, reachable);
+                    Visit(item, document, reachable, depth + 1);
                 break;
         }
     }

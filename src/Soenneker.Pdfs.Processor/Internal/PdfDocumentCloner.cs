@@ -4,9 +4,9 @@ internal static class PdfDocumentCloner
 {
     private static readonly string[] InheritedPageKeys = ["Resources", "MediaBox", "CropBox", "Rotate"];
 
-    internal static PdfDocumentModel CreateDocument()
+    internal static PdfDocumentModel CreateDocument(CancellationToken cancellationToken = default)
     {
-        var document = new PdfDocumentModel();
+        var document = new PdfDocumentModel { DecodeBudget = new PdfDecodeBudget(cancellationToken) };
         var catalogReference = new PdfReference(1);
         var pagesReference = new PdfReference(2);
         document.Objects[1] = new PdfIndirectObject
@@ -71,8 +71,9 @@ internal static class PdfDocumentCloner
     }
 
     internal static PdfReference CloneReference(PdfDocumentModel source, PdfDocumentModel destination, PdfReference reference,
-        Dictionary<int, PdfReference> map)
+        Dictionary<int, PdfReference> map, int depth = 0)
     {
+        PdfProcessingLimits.CheckDepth(depth);
         if (map.TryGetValue(reference.ObjectNumber, out PdfReference? existing))
             return existing;
 
@@ -82,25 +83,30 @@ internal static class PdfDocumentCloner
         map[reference.ObjectNumber] = destinationReference;
         var destinationObject = new PdfIndirectObject { Number = number, Value = PdfNull.Instance };
         destination.Objects[number] = destinationObject;
-        destinationObject.Value = CloneValue(source, destination, sourceObject.Value, map);
+        destinationObject.Value = CloneValue(source, destination, sourceObject.Value, map, depth + 1);
         destinationObject.StreamData = sourceObject.StreamData?.ToArray();
         return destinationReference;
     }
 
     internal static PdfValue CloneValue(PdfDocumentModel source, PdfDocumentModel destination, PdfValue value,
-        Dictionary<int, PdfReference> map) => value switch
+        Dictionary<int, PdfReference> map, int depth = 0)
+    {
+        PdfProcessingLimits.CheckDepth(depth);
+        source.DecodeBudget.CancellationToken.ThrowIfCancellationRequested();
+        return value switch
         {
             PdfNull => PdfNull.Instance,
             PdfBoolean boolean => boolean,
             PdfNumber number => number,
             PdfName name => name,
             PdfString text => new PdfString(text.Value.ToArray(), text.Hex),
-            PdfReference reference => CloneReference(source, destination, reference, map),
-            PdfArray array => new PdfArray(array.Items.Select(item => CloneValue(source, destination, item, map)).ToList()),
+            PdfReference reference => CloneReference(source, destination, reference, map, depth + 1),
+            PdfArray array => new PdfArray(array.Items.Select(item => CloneValue(source, destination, item, map, depth + 1)).ToList()),
             PdfDictionary dictionary => new PdfDictionary(dictionary.Items
-                .ToDictionary(item => item.Key, item => CloneValue(source, destination, item.Value, map), StringComparer.Ordinal)),
+                .ToDictionary(item => item.Key, item => CloneValue(source, destination, item.Value, map, depth + 1), StringComparer.Ordinal)),
             _ => throw new InvalidDataException($"Unsupported PDF value type {value.GetType().Name}.")
         };
+    }
 
     private static void MaterializeInheritedPageValues(PdfDocumentModel document, PdfDictionary page, Dictionary<string, PdfValue> result)
     {
@@ -120,5 +126,10 @@ internal static class PdfDocumentCloner
         }
     }
 
-    private static int NextNumber(PdfDocumentModel document) => document.Objects.Count == 0 ? 1 : document.Objects.Keys.Max() + 1;
+    private static int NextNumber(PdfDocumentModel document)
+    {
+        if (document.Objects.Count >= PdfProcessingLimits.MaximumObjects)
+            throw new PdfLimitExceededException("The merged PDF exceeds the object limit.");
+        return document.Objects.Count == 0 ? 1 : checked(document.Objects.Keys.Max() + 1);
+    }
 }

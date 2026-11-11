@@ -2,6 +2,7 @@ using Soenneker.Pdfs.Processor.Enums;
 using Soenneker.Pdfs.Processor.Options;
 using Soenneker.Utils.MemoryStream.Abstract;
 using Soenneker.Utils.PooledStringBuilders;
+using System.Buffers;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -154,7 +155,7 @@ internal static class PdfDocumentWriter
         }
 
         dictionary.Items["Filter"] = new PdfName("FlateDecode");
-        streamObject.StreamData = Compress(decoded, GetCompressionLevel(profile), memoryStreamUtil);
+        streamObject.StreamData = Compress(decoded, GetCompressionLevel(profile));
     }
 
     private static void RecompressStreams(PdfDocumentModel document, PdfCompressionProfile profile, IMemoryStreamUtil memoryStreamUtil)
@@ -224,12 +225,25 @@ internal static class PdfDocumentWriter
         return CompressionLevel.Optimal;
     }
 
-    private static byte[] Compress(byte[] value, CompressionLevel level, IMemoryStreamUtil memoryStreamUtil)
+    private static byte[] Compress(byte[] value, CompressionLevel level)
     {
-        using MemoryStream output = memoryStreamUtil.GetSync();
-        using (var compressor = new ZLibStream(output, level, leaveOpen: true))
-            compressor.Write(value);
-        return output.ToArray();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(checked((int)ZLibEncoder.GetMaxCompressedLength(value.Length)));
+        try
+        {
+            int quality = level switch
+            {
+                CompressionLevel.Fastest => 1,
+                CompressionLevel.SmallestSize => 9,
+                _ => -1
+            };
+            if (!ZLibEncoder.TryCompress(value, buffer, out int written, quality))
+                throw new InvalidOperationException("The zlib output exceeded its maximum compressed length.");
+            return buffer.AsSpan(0, written).ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        }
     }
 
     private static async ValueTask WriteValue(Stream destination, PdfValue value, CancellationToken cancellationToken)

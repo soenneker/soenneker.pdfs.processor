@@ -1,3 +1,4 @@
+using System.Buffers;
 using Soenneker.Utils.MemoryStream.Abstract;
 using System.IO.Compression;
 
@@ -13,16 +14,7 @@ internal static class PdfDocumentReader
         stream.Position = 0;
         if (stream.Length > PdfProcessingLimits.MaximumInputBytes)
             throw new PdfLimitExceededException("The PDF exceeds the input byte limit.");
-        using MemoryStream input = memoryStreamUtil.GetSync();
-        var buffer = new byte[81920];
-        int bytesRead;
-        while ((bytesRead = await stream.ReadAsync(buffer, cancellationToken)) != 0)
-        {
-            if (input.Length + bytesRead > PdfProcessingLimits.MaximumInputBytes)
-                throw new PdfLimitExceededException("The PDF exceeds the input byte limit.");
-            input.Write(buffer, 0, bytesRead);
-        }
-        byte[] data = input.ToArray();
+        byte[] data = await ReadInput(stream, memoryStreamUtil, cancellationToken);
 
         if (data.Length < 8 || data.AsSpan(0, Math.Min(data.Length, 1024)).IndexOf("%PDF-"u8) < 0)
             throw new InvalidDataException("The source is not a PDF document.");
@@ -81,6 +73,37 @@ internal static class PdfDocumentReader
         ExpandObjectStreams(document, memoryStreamUtil);
         ResolveDocumentReferences(document);
         return document;
+    }
+
+    private static async ValueTask<byte[]> ReadInput(Stream stream, IMemoryStreamUtil memoryStreamUtil, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (stream.GetType() == typeof(MemoryStream))
+        {
+            var memory = (MemoryStream)stream;
+            byte[] data = memory.ToArray();
+            memory.Position = memory.Length;
+            return data;
+        }
+
+        using MemoryStream input = memoryStreamUtil.GetSync();
+        const int bufferSize = 81920;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+        try
+        {
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, bufferSize), cancellationToken)) != 0)
+            {
+                if (input.Length + bytesRead > PdfProcessingLimits.MaximumInputBytes)
+                    throw new PdfLimitExceededException("The PDF exceeds the input byte limit.");
+                input.Write(buffer, 0, bytesRead);
+            }
+            return input.ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        }
     }
 
     internal static byte[] DecodeStream(PdfIndirectObject streamObject, PdfDocumentModel document, IMemoryStreamUtil memoryStreamUtil)
